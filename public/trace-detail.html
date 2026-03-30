@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trace Detail</title>
+<style>
+:root {
+  --color-background-primary: light-dark(#ffffff, #0f1117);
+  --color-background-secondary: light-dark(#f8f9fa, #1a1d27);
+  --color-background-tertiary: light-dark(#e9ecef, #22263a);
+  --color-text-primary: light-dark(#171717, #e2e8f0);
+  --color-text-secondary: light-dark(#6b7280, #94a3b8);
+  --color-text-danger: light-dark(#dc2626, #ef4444);
+  --color-text-success: light-dark(#16a34a, #22c55e);
+  --color-border-primary: light-dark(#e5e7eb, #2e3348);
+  --font-sans: system-ui, -apple-system, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --border-radius-md: 8px;
+  --border-radius-lg: 12px;
+  color-scheme: light dark;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: var(--font-sans);
+  background: var(--color-background-primary);
+  color: var(--color-text-primary);
+  padding: 16px;
+  line-height: 1.5;
+}
+.header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
+.header h1 { font-size: 1.1rem; font-weight: 600; }
+.header-meta { font-size: 0.8rem; color: var(--color-text-secondary); font-family: var(--font-mono); }
+.stats-row { display: flex; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.stat { font-size: 0.82rem; }
+.stat b { font-weight: 600; }
+.actions { display: flex; gap: 8px; margin-bottom: 16px; }
+.btn {
+  padding: 6px 14px; border: 1px solid var(--color-border-primary);
+  border-radius: var(--border-radius-md); background: var(--color-background-secondary);
+  color: var(--color-text-primary); font-size: 0.8rem; cursor: pointer; font-family: var(--font-sans);
+}
+.btn:hover { background: var(--color-background-tertiary); }
+.btn.primary { background: #6366f1; color: white; border-color: #6366f1; }
+.btn.primary:hover { background: #818cf8; }
+.btn.sm { padding: 4px 10px; font-size: 0.75rem; margin-top: 8px; }
+
+/* Waterfall */
+.waterfall { position: relative; overflow-x: auto; }
+.span-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 35%) 1fr;
+  border-bottom: 1px solid var(--color-border-primary);
+  min-height: 28px; align-items: center;
+  font-size: 0.8rem;
+}
+.span-row:hover { background: var(--color-background-tertiary); }
+.span-row.error { background: rgba(239,68,68,0.06); }
+.span-label {
+  padding: 4px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-family: var(--font-mono); font-size: 0.78rem;
+  cursor: pointer;
+}
+.span-label .indent { display: inline-block; }
+.span-label .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.span-bar-area { position: relative; height: 28px; }
+.span-bar {
+  position: absolute; top: 8px; height: 12px; border-radius: 3px;
+  min-width: 2px; transition: opacity 0.1s;
+}
+.span-bar:hover { opacity: 0.8; }
+.span-row.error .span-bar { background: #ef4444 !important; }
+
+/* Span detail panel */
+.span-detail {
+  display: none; background: var(--color-background-secondary);
+  border: 1px solid var(--color-border-primary); border-radius: var(--border-radius-md);
+  padding: 12px 16px; margin: 8px 0 8px 0; font-size: 0.82rem;
+}
+.span-detail.visible { display: block; }
+.span-detail h3 { font-size: 0.9rem; margin-bottom: 8px; }
+.attr-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.attr-table td { padding: 3px 8px; border-bottom: 1px solid var(--color-border-primary); }
+.attr-table td:first-child { font-weight: 500; color: var(--color-text-secondary); white-space: nowrap; width: 200px; }
+.attr-table td:last-child { font-family: var(--font-mono); word-break: break-all; }
+
+/* Timeline ruler */
+.ruler { display: flex; justify-content: space-between; padding: 0 0 4px 0; font-size: 0.68rem; color: var(--color-text-secondary); font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1 id="trace-title">Trace Detail</h1>
+    <span class="header-meta" id="trace-meta"></span>
+  </div>
+</div>
+<div class="stats-row" id="stats-row"></div>
+<div class="actions">
+  <button class="btn" id="btn-fullscreen" title="Toggle fullscreen">⛶ Fullscreen</button>
+  <button class="btn primary" id="btn-analyze" title="Ask the model to analyze this trace">🔍 Analyze This Trace</button>
+</div>
+<div class="waterfall" id="waterfall"></div>
+
+<script>
+// ---- MCP App comms ----
+let nextId = 1;
+const pending = new Map();
+const handlers = new Map();
+
+function send(method, params) {
+  const id = nextId++;
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+  });
+}
+function notify(method, params) { window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*"); }
+function on(method, fn) { handlers.set(method, fn); }
+
+window.addEventListener("message", (e) => {
+  const d = e.data;
+  if (!d || d.jsonrpc !== "2.0") return;
+  if (d.id && pending.has(d.id)) {
+    const p = pending.get(d.id); pending.delete(d.id);
+    d.error ? p.reject(d.error) : p.resolve(d.result);
+  }
+  if (d.method && handlers.has(d.method)) handlers.get(d.method)(d.params);
+});
+
+// ---- Theme ----
+function applyTheme(ctx) {
+  if (ctx.theme) document.documentElement.style.colorScheme = ctx.theme;
+  if (ctx.styles?.variables) {
+    for (const [k, v] of Object.entries(ctx.styles.variables)) {
+      if (v) document.documentElement.style.setProperty(k, v);
+    }
+  }
+}
+
+// ---- Colors for services ----
+const svcColors = [
+  "#6366f1", "#8b5cf6", "#ec4899", "#f43f5e", "#f97316",
+  "#eab308", "#22c55e", "#14b8a6", "#06b6d4", "#3b82f6",
+];
+const svcColorMap = new Map();
+function colorFor(svc) {
+  if (!svcColorMap.has(svc)) svcColorMap.set(svc, svcColors[svcColorMap.size % svcColors.length]);
+  return svcColorMap.get(svc);
+}
+
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+function fmt(ms) { return ms >= 1000 ? (ms/1000).toFixed(2)+"s" : ms.toFixed(1)+"ms"; }
+
+// ---- State ----
+let currentDetail = null;
+let isFullscreen = false;
+let hostAvailableDisplayModes = [];
+
+// ---- Render waterfall ----
+function renderDetail(detail) {
+  currentDetail = detail;
+  document.getElementById("trace-title").textContent = detail.rootSpanName;
+  document.getElementById("trace-meta").textContent = `${detail.traceId.slice(0, 16)}… · ${new Date(detail.startTime).toLocaleString()}`;
+
+  document.getElementById("stats-row").innerHTML = [
+    `<span class="stat"><b>${detail.spanCount}</b> spans</span>`,
+    `<span class="stat"><b>${fmt(detail.durationMs)}</b> total</span>`,
+    `<span class="stat"><b>${detail.errorCount}</b> errors</span>`,
+    `<span class="stat">Services: <b>${detail.services.join(", ")}</b></span>`,
+  ].join("");
+
+  const totalMs = detail.durationMs || 1;
+  const wf = document.getElementById("waterfall");
+
+  // Build depth map for indentation
+  const depthMap = new Map();
+  for (const s of detail.spans) {
+    const parentDepth = depthMap.get(s.parentSpanId) ?? -1;
+    depthMap.set(s.spanId, parentDepth + 1);
+  }
+
+  // Ruler
+  const rulerSteps = 5;
+  let rulerHtml = '<div class="ruler" style="padding-left:35%">';
+  for (let i = 0; i <= rulerSteps; i++) {
+    rulerHtml += `<span>${fmt((totalMs / rulerSteps) * i)}</span>`;
+  }
+  rulerHtml += '</div>';
+
+  // Span rows
+  let html = rulerHtml;
+  for (let i = 0; i < detail.spans.length; i++) {
+    const s = detail.spans[i];
+    const depth = depthMap.get(s.spanId) ?? 0;
+    const leftPct = (s.startOffsetMs / totalMs) * 100;
+    const widthPct = Math.max(0.3, (s.durationMs / totalMs) * 100);
+    const color = colorFor(s.serviceName);
+    const isErr = s.statusCode === 2;
+
+    html += `
+      <div class="span-row ${isErr ? "error" : ""}" data-idx="${i}">
+        <div class="span-label" title="${esc(s.name)}">
+          <span class="indent" style="width:${depth * 16}px"></span>
+          <span class="dot" style="background:${color}"></span>
+          ${esc(s.name)}
+          <span style="color:var(--color-text-secondary);font-size:0.7rem;margin-left:4px">${fmt(s.durationMs)}</span>
+        </div>
+        <div class="span-bar-area">
+          <div class="span-bar" style="left:${leftPct}%;width:${widthPct}%;background:${color}" title="${esc(s.name)}: ${fmt(s.durationMs)}"></div>
+        </div>
+      </div>
+      <div class="span-detail" id="detail-${i}">
+        <h3>${esc(s.name)}</h3>
+        <table class="attr-table">
+          <tr><td>Span ID</td><td>${s.spanId}</td></tr>
+          <tr><td>Service</td><td>${s.serviceName}</td></tr>
+          <tr><td>Duration</td><td>${fmt(s.durationMs)}</td></tr>
+          <tr><td>Start Offset</td><td>${fmt(s.startOffsetMs)}</td></tr>
+          <tr><td>Status</td><td>${isErr ? "ERROR" : "OK"}</td></tr>
+          <tr><td>Kind</td><td>${["UNSPECIFIED","INTERNAL","SERVER","CLIENT","PRODUCER","CONSUMER"][s.kind] ?? s.kind}</td></tr>
+          ${Object.entries(s.attributes || {}).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("")}
+        </table>
+        <button class="btn sm" data-span-id="${s.spanId}" data-span-name="${esc(s.name)}" onclick="inspectSpan(this)">🔍 Inspect this span</button>
+      </div>
+    `;
+  }
+
+  wf.innerHTML = html;
+
+  // Click to toggle span detail
+  wf.querySelectorAll(".span-row").forEach(row => {
+    row.addEventListener("click", () => {
+      const idx = row.dataset.idx;
+      const det = document.getElementById("detail-" + idx);
+      det.classList.toggle("visible");
+    });
+  });
+
+  // Push context to model
+  updateContext();
+}
+
+function inspectSpan(btn) {
+  const spanId = btn.dataset.spanId;
+  const spanName = btn.dataset.spanName;
+  const traceId = currentDetail?.traceId;
+  if (!spanId || !traceId) return;
+  btn.disabled = true;
+  btn.textContent = "Requesting…";
+  send("ui/message", {
+    role: "user",
+    content: { type: "text", text: `Inspect span "${spanName}" (spanId: ${spanId}) in trace ${traceId}` },
+  }).catch(() => {});
+}
+
+// ---- updateModelContext with trace info ----
+async function updateContext() {
+  if (!currentDetail) return;
+  const d = currentDetail;
+  const ctx = [
+    `---`,
+    `trace-id: ${d.traceId}`,
+    `root-span: ${d.rootSpanName}`,
+    `duration: ${d.durationMs}ms`,
+    `span-count: ${d.spanCount}`,
+    `error-count: ${d.errorCount}`,
+    `services: ${d.services.join(", ")}`,
+    `---`,
+    ``,
+    `Span hierarchy:`,
+    ...d.spans.map(s => `- ${"  ".repeat(Math.min(5, s.startOffsetMs > 0 ? 1 : 0))}${s.name} (${s.serviceName}, ${s.durationMs}ms${s.statusCode === 2 ? ", ERROR" : ""})`)
+  ].join("\n");
+
+  try {
+    await send("ui/update-model-context", { content: [{ type: "text", text: ctx }] });
+  } catch {}
+}
+
+// ---- Fullscreen toggle ----
+document.getElementById("btn-fullscreen").addEventListener("click", async () => {
+  const newMode = isFullscreen ? "inline" : "fullscreen";
+  if (!hostAvailableDisplayModes.includes(newMode)) return;
+  try {
+    const r = await send("ui/request-display-mode", { mode: newMode });
+    isFullscreen = r?.mode === "fullscreen";
+    document.getElementById("btn-fullscreen").textContent = isFullscreen ? "⛶ Exit Fullscreen" : "⛶ Fullscreen";
+  } catch {}
+});
+
+// ---- Analyze button → sendMessage ----
+document.getElementById("btn-analyze").addEventListener("click", async () => {
+  if (!currentDetail) return;
+  await updateContext();
+  try {
+    await send("ui/message", {
+      role: "user",
+      content: {
+        type: "text",
+        text: `Analyze the performance of trace "${currentDetail.rootSpanName}" (${currentDetail.traceId.slice(0, 8)}…). ` +
+              `It has ${currentDetail.spanCount} spans over ${currentDetail.durationMs}ms. ` +
+              `Look for bottlenecks, unusually slow spans, and suggest optimizations.`
+      },
+    });
+  } catch {}
+});
+
+// ---- Host context ----
+on("ui/notifications/host-context-changed", (ctx) => {
+  applyTheme(ctx);
+  if (ctx.displayMode) {
+    isFullscreen = ctx.displayMode === "fullscreen";
+    document.getElementById("btn-fullscreen").textContent = isFullscreen ? "⛶ Exit Fullscreen" : "⛶ Fullscreen";
+  }
+  if (ctx.availableDisplayModes) hostAvailableDisplayModes = ctx.availableDisplayModes;
+});
+
+// ---- Tool result ----
+on("ui/notifications/tool-result", (params) => {
+  if (params?.structuredContent) renderDetail(params.structuredContent);
+});
+
+// ---- Partial input for progressive rendering ----
+on("ui/notifications/tool-input-partial", (params) => {
+  if (params?.arguments?.traceId) {
+    document.getElementById("trace-title").textContent = "Loading trace " + params.arguments.traceId.slice(0, 8) + "…";
+  }
+});
+
+on("ui/notifications/tool-input", () => {});
+
+// ---- Size reporting via ResizeObserver ----
+let lastW = 0, lastH = 0;
+const resizeObs = new ResizeObserver((entries) => {
+  for (const e of entries) {
+    const w = Math.ceil(e.contentRect.width);
+    const h = Math.ceil(e.contentRect.height);
+    if (w !== lastW || h !== lastH) {
+      lastW = w; lastH = h;
+      notify("ui/notifications/size-changed", { width: w, height: h });
+    }
+  }
+});
+resizeObs.observe(document.body);
+
+// ---- Initialize ----
+(async () => {
+  try {
+    const result = await send("ui/initialize", {
+      protocolVersion: "2026-01-26",
+      capabilities: { availableDisplayModes: ["inline", "fullscreen"] },
+      clientInfo: { name: "otel-trace-detail", version: "0.1.0" },
+    });
+    if (result?.hostContext) {
+      applyTheme(result.hostContext);
+      if (result.hostContext.availableDisplayModes) hostAvailableDisplayModes = result.hostContext.availableDisplayModes;
+      isFullscreen = result.hostContext.displayMode === "fullscreen";
+    }
+    notify("ui/notifications/initialized", {});
+  } catch (e) {
+    console.error("App init failed:", e);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Select Data Source — OTel Explorer</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface-hover: #22263a;
+      --border: #2e3348;
+      --border-active: #6366f1;
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --danger: #ef4444;
+      --success: #22c55e;
+      --radius: 12px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 560px;
+      width: 100%;
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .subtitle {
+      font-size: 0.9rem;
+      color: var(--text-muted);
+      margin-bottom: 28px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .card {
+      background: var(--surface);
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 16px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      text-align: center;
+      user-select: none;
+    }
+
+    .card:hover { background: var(--surface-hover); }
+    .card.active { border-color: var(--accent); background: var(--surface-hover); }
+
+    .card-icon {
+      font-size: 2rem;
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    .card-title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      margin-bottom: 4px;
+    }
+
+    .card-desc {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .form-section {
+      display: none;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 20px;
+      animation: slideIn 0.2s ease;
+    }
+
+    .form-section.visible { display: block; }
+
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateY(-8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .field {
+      margin-bottom: 16px;
+    }
+
+    .field:last-child { margin-bottom: 0; }
+
+    label {
+      display: block;
+      font-size: 0.82rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+      letter-spacing: 0.02em;
+    }
+
+    input {
+      width: 100%;
+      padding: 10px 14px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 0.9rem;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    input:focus { border-color: var(--accent); }
+    input::placeholder { color: #4a5068; }
+
+    .row {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 12px;
+    }
+
+    button.submit {
+      width: 100%;
+      padding: 12px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    button.submit:hover { background: var(--accent-hover); }
+    button.submit:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .status {
+      margin-top: 16px;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      display: none;
+    }
+
+    .status.error {
+      display: block;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: var(--danger);
+    }
+
+    .status.success {
+      display: block;
+      background: rgba(34, 197, 94, 0.1);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      color: var(--success);
+    }
+
+    .status.loading {
+      display: block;
+      background: rgba(99, 102, 241, 0.1);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      color: var(--accent);
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid currentColor;
+      border-right-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Load Trace Data</h1>
+    <p class="subtitle">Choose a data source to load OpenTelemetry traces from.</p>
+
+    <div class="cards">
+      <div class="card" data-mode="local" onclick="selectMode('local')">
+        <span class="card-icon">📁</span>
+        <div class="card-title">Local File</div>
+        <div class="card-desc">Read a traces.jsonl file from this machine</div>
+      </div>
+      <div class="card" data-mode="remote" onclick="selectMode('remote')">
+        <span class="card-icon">🌐</span>
+        <div class="card-title">Remote File</div>
+        <div class="card-desc">Copy a file from a remote host via SCP</div>
+      </div>
+    </div>
+
+    <div class="form-section" id="local-form">
+      <div class="field">
+        <label for="local-path">File Path</label>
+        <input type="text" id="local-path" placeholder="/var/log/otel/traces.jsonl" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+
+    <div class="form-section" id="remote-form">
+      <div class="row">
+        <div class="field">
+          <label for="remote-host">Host</label>
+          <input type="text" id="remote-host" placeholder="prod-server.example.com" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="remote-user">Username</label>
+          <input type="text" id="remote-user" placeholder="ubuntu" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+      <div class="field">
+        <label for="remote-path">Remote File Path</label>
+        <input type="text" id="remote-path" placeholder="/var/log/otel/traces.jsonl" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+
+    <button class="submit" id="submit-btn" onclick="submit()" disabled>Load Traces</button>
+    <div class="status" id="status"></div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('session');
+    const elicitationId = params.get('elicitation');
+
+    let currentMode = null;
+
+    function selectMode(mode) {
+      currentMode = mode;
+      document.querySelectorAll('.card').forEach(c => c.classList.toggle('active', c.dataset.mode === mode));
+      document.getElementById('local-form').classList.toggle('visible', mode === 'local');
+      document.getElementById('remote-form').classList.toggle('visible', mode === 'remote');
+      document.getElementById('submit-btn').disabled = false;
+      clearStatus();
+    }
+
+    function clearStatus() {
+      const el = document.getElementById('status');
+      el.className = 'status';
+      el.textContent = '';
+    }
+
+    function showStatus(type, msg) {
+      const el = document.getElementById('status');
+      el.className = 'status ' + type;
+      el.innerHTML = type === 'loading' ? '<span class="spinner"></span>' + msg : msg;
+    }
+
+    async function submit() {
+      if (!currentMode) return;
+
+      const btn = document.getElementById('submit-btn');
+      btn.disabled = true;
+
+      let body;
+      if (currentMode === 'local') {
+        const localPath = document.getElementById('local-path').value.trim();
+        if (!localPath) {
+          showStatus('error', 'Please enter a file path.');
+          btn.disabled = false;
+          return;
+        }
+        body = { type: 'local', localPath, sessionId, elicitationId };
+      } else {
+        const host = document.getElementById('remote-host').value.trim();
+        const user = document.getElementById('remote-user').value.trim();
+        const remotePath = document.getElementById('remote-path').value.trim();
+        if (!host || !remotePath) {
+          showStatus('error', 'Host and remote path are required.');
+          btn.disabled = false;
+          return;
+        }
+        body = { type: 'remote', remoteHost: host, remoteUser: user || 'root', remotePath, sessionId, elicitationId };
+      }
+
+      showStatus('loading', 'Loading traces…');
+
+      try {
+        const res = await fetch('/api/select-source', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (res.ok && data.ok) {
+          showStatus('success', data.message || 'Traces loaded successfully. You can close this tab.');
+        } else {
+          showStatus('error', data.error || 'Something went wrong.');
+          btn.disabled = false;
+        }
+      } catch (err) {
+        showStatus('error', 'Network error: ' + err.message);
+        btn.disabled = false;
+      }
+    }
+
+    // Allow Enter key to submit
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && currentMode && !document.getElementById('submit-btn').disabled) {
+        submit();
+      }
+    });
+  </script>
+</body>
+</html>

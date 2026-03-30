@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Span Breakdown</title>
+<style>
+:root {
+  --color-background-primary: light-dark(#ffffff, #0f1117);
+  --color-background-secondary: light-dark(#f8f9fa, #1a1d27);
+  --color-background-tertiary: light-dark(#e9ecef, #22263a);
+  --color-text-primary: light-dark(#171717, #e2e8f0);
+  --color-text-secondary: light-dark(#6b7280, #94a3b8);
+  --color-text-danger: light-dark(#dc2626, #ef4444);
+  --color-text-success: light-dark(#16a34a, #22c55e);
+  --color-text-warning: light-dark(#d97706, #f59e0b);
+  --color-border-primary: light-dark(#e5e7eb, #2e3348);
+  --color-ring-primary: light-dark(#6366f1, #818cf8);
+  --font-sans: system-ui, -apple-system, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --border-radius-md: 8px;
+  --border-radius-lg: 12px;
+  color-scheme: light dark;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: var(--font-sans);
+  background: var(--color-background-primary);
+  color: var(--color-text-primary);
+  padding: 16px;
+  line-height: 1.5;
+}
+h1 { font-size: 1.15rem; font-weight: 600; margin-bottom: 2px; }
+.subtitle { font-size: 0.8rem; color: var(--color-text-secondary); font-family: var(--font-mono); margin-bottom: 16px; }
+h2 { font-size: 0.85rem; font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
+.section { margin-bottom: 20px; }
+
+/* Stats grid */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin-bottom: 20px; }
+.stat-card { background: var(--color-background-secondary); border: 1px solid var(--color-border-primary); border-radius: var(--border-radius-md); padding: 10px 14px; }
+.stat-label { font-size: 0.7rem; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.04em; }
+.stat-value { font-size: 1.25rem; font-weight: 700; margin-top: 2px; }
+.stat-value.error { color: var(--color-text-danger); }
+.stat-value.ok { color: var(--color-text-success); }
+.stat-value.warn { color: var(--color-text-warning); }
+
+/* Timing bar */
+.timing-bar-container { margin-bottom: 20px; }
+.timing-bar { display: flex; height: 24px; border-radius: 6px; overflow: hidden; background: var(--color-background-tertiary); }
+.timing-self { background: #6366f1; }
+.timing-children { background: #6366f133; }
+.timing-legend { display: flex; gap: 16px; margin-top: 6px; font-size: 0.75rem; color: var(--color-text-secondary); }
+.timing-legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+.timing-legend .self::before { background: #6366f1; }
+.timing-legend .child::before { background: #6366f133; }
+
+/* Distribution chart (horizontal dot distribution) */
+.distro { position: relative; height: 40px; background: var(--color-background-secondary); border: 1px solid var(--color-border-primary); border-radius: 6px; margin-bottom: 6px; overflow: hidden; }
+.distro-dot { position: absolute; top: 50%; width: 4px; height: 4px; border-radius: 50%; background: #6366f144; transform: translateY(-50%); }
+.distro-dot.this { width: 8px; height: 8px; background: #ef4444; z-index: 2; border: 2px solid #fff; }
+.distro-labels { display: flex; justify-content: space-between; font-size: 0.68rem; color: var(--color-text-secondary); font-family: var(--font-mono); }
+.distro-stat { font-size: 0.78rem; color: var(--color-text-secondary); margin-top: 4px; }
+.distro-stat b { color: var(--color-text-primary); }
+
+/* Call chain */
+.chain { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.chain-item { background: var(--color-background-secondary); border: 1px solid var(--color-border-primary); border-radius: 6px; padding: 4px 10px; font-size: 0.78rem; font-family: var(--font-mono); }
+.chain-item.current { background: rgba(99,102,241,0.15); border-color: var(--color-ring-primary); font-weight: 600; }
+.chain-arrow { color: var(--color-text-secondary); font-size: 0.75rem; }
+
+/* Children table */
+table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+th { text-align: left; padding: 6px 8px; border-bottom: 2px solid var(--color-border-primary); color: var(--color-text-secondary); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+td { padding: 5px 8px; border-bottom: 1px solid var(--color-border-primary); }
+.mono { font-family: var(--font-mono); font-size: 0.78rem; }
+.badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 0.68rem; font-weight: 600; }
+.badge.err { background: rgba(239,68,68,0.15); color: var(--color-text-danger); }
+.badge.ok { background: rgba(34,197,94,0.15); color: var(--color-text-success); }
+
+/* Attributes */
+.attr-grid { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 0.8rem; }
+.attr-key { color: var(--color-text-secondary); font-weight: 500; white-space: nowrap; }
+.attr-val { font-family: var(--font-mono); font-size: 0.78rem; word-break: break-all; }
+
+/* Action cards — the user picks one of these */
+.action-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+.action-card {
+  background: var(--color-background-secondary); border: 2px solid var(--color-border-primary);
+  border-radius: var(--border-radius-lg); padding: 14px 16px; cursor: pointer;
+  transition: all 0.15s; user-select: none;
+}
+.action-card:hover { background: var(--color-background-tertiary); border-color: var(--color-ring-primary); }
+.action-card .icon { font-size: 1.3rem; margin-bottom: 4px; }
+.action-card .title { font-weight: 600; font-size: 0.88rem; margin-bottom: 2px; }
+.action-card .desc { font-size: 0.75rem; color: var(--color-text-secondary); }
+
+.submitted { text-align: center; padding: 20px; color: var(--color-text-secondary); font-size: 0.9rem; display: none; }
+.submitted.visible { display: block; }
+</style>
+</head>
+<body>
+<h1 id="span-title">Span Breakdown</h1>
+<div class="subtitle" id="span-subtitle"></div>
+
+<div class="stats" id="stats"></div>
+
+<div class="section timing-bar-container" id="timing-section">
+  <h2>Time Breakdown</h2>
+  <div class="timing-bar" id="timing-bar"></div>
+  <div class="timing-legend"><span class="self">Self time</span><span class="child">Children</span></div>
+</div>
+
+<div class="section" id="chain-section">
+  <h2>Call Chain</h2>
+  <div class="chain" id="call-chain"></div>
+</div>
+
+<div class="section" id="distro-section">
+  <h2>Compared to Similar Spans</h2>
+  <div class="distro" id="distro"></div>
+  <div class="distro-labels" id="distro-labels"></div>
+  <div class="distro-stat" id="distro-stat"></div>
+</div>
+
+<div class="section" id="children-section" style="display:none">
+  <h2>Child Spans</h2>
+  <table><thead><tr><th>Name</th><th>Service</th><th>Duration</th><th>Status</th></tr></thead><tbody id="children-body"></tbody></table>
+</div>
+
+<div class="section" id="attrs-section">
+  <h2>Attributes</h2>
+  <div class="attr-grid" id="attrs"></div>
+</div>
+
+<div class="section" id="actions-section">
+  <h2>What would you like to do?</h2>
+  <div class="action-cards" id="action-cards"></div>
+</div>
+
+<div class="submitted" id="submitted">✓ Action submitted — the model is processing your request.</div>
+
+<script>
+// ---- MCP App comms ----
+let nextId = 1;
+const pending = new Map();
+const handlers = new Map();
+
+function send(method, params) {
+  const id = nextId++;
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+  });
+}
+function notify(method, params) { window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*"); }
+function on(method, fn) { handlers.set(method, fn); }
+
+window.addEventListener("message", (e) => {
+  const d = e.data;
+  if (!d || d.jsonrpc !== "2.0") return;
+  if (d.id && pending.has(d.id)) {
+    const p = pending.get(d.id); pending.delete(d.id);
+    d.error ? p.reject(d.error) : p.resolve(d.result);
+  }
+  if (d.method && handlers.has(d.method)) handlers.get(d.method)(d.params);
+});
+
+function applyTheme(ctx) {
+  if (ctx.theme) document.documentElement.style.colorScheme = ctx.theme;
+  if (ctx.styles?.variables) {
+    for (const [k, v] of Object.entries(ctx.styles.variables)) {
+      if (v) document.documentElement.style.setProperty(k, v);
+    }
+  }
+}
+
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+function fmt(ms) { return ms >= 1000 ? (ms / 1000).toFixed(2) + "s" : ms.toFixed(1) + "ms"; }
+
+// ---- State ----
+let requestId = null;
+let currentData = null;
+
+function render(data) {
+  currentData = data;
+  const s = data.span;
+
+  document.getElementById("span-title").textContent = s.name;
+  document.getElementById("span-subtitle").textContent =
+    `${s.serviceName} · ${s.spanId} · ${new Date(s.startTime).toLocaleString()}`;
+
+  // Stats
+  const isErr = s.statusCode === 2;
+  const selfPct = s.durationMs > 0 ? Math.round((s.selfTimeMs / s.durationMs) * 100) : 100;
+  const kindNames = ["UNSPECIFIED","INTERNAL","SERVER","CLIENT","PRODUCER","CONSUMER"];
+  document.getElementById("stats").innerHTML = [
+    statCard("Duration", fmt(s.durationMs)),
+    statCard("Self Time", `${fmt(s.selfTimeMs)} (${selfPct}%)`),
+    statCard("Status", isErr ? "ERROR" : "OK", isErr ? "error" : "ok"),
+    statCard("Kind", kindNames[s.kind] ?? s.kind),
+    statCard("Children", data.children.length),
+    statCard("Rank", `${data.similarSpans.thisRank}/${data.similarSpans.count}`,
+      data.similarSpans.thisRank > data.similarSpans.count * 0.9 ? "warn" : ""),
+  ].join("");
+
+  // Timing bar
+  const childPct = 100 - selfPct;
+  document.getElementById("timing-bar").innerHTML =
+    `<div class="timing-self" style="width:${selfPct}%" title="Self: ${fmt(s.selfTimeMs)}"></div>` +
+    `<div class="timing-children" style="width:${childPct}%" title="Children: ${fmt(s.durationMs - s.selfTimeMs)}"></div>`;
+
+  // Distribution
+  const sim = data.similarSpans;
+  const distroEl = document.getElementById("distro");
+  if (sim.count > 1 && sim.maxMs > sim.minMs) {
+    const range = sim.maxMs - sim.minMs;
+    let dots = "";
+    for (const d of sim.durations) {
+      const pct = ((d - sim.minMs) / range) * 100;
+      const isCurrent = Math.abs(d - s.durationMs) < 0.01;
+      dots += `<div class="distro-dot ${isCurrent ? "this" : ""}" style="left:${pct}%"></div>`;
+    }
+    distroEl.innerHTML = dots;
+    document.getElementById("distro-labels").innerHTML =
+      `<span>${fmt(sim.minMs)}</span><span>p50: ${fmt(sim.p50Ms)}</span><span>p95: ${fmt(sim.p95Ms)}</span><span>${fmt(sim.maxMs)}</span>`;
+    document.getElementById("distro-stat").innerHTML =
+      `This span: <b>${fmt(s.durationMs)}</b> · avg: <b>${fmt(sim.avgMs)}</b> · rank <b>${sim.thisRank}</b> of <b>${sim.count}</b>`;
+  } else {
+    document.getElementById("distro-section").style.display = "none";
+  }
+
+  // Call chain
+  const chainEl = document.getElementById("call-chain");
+  const chainItems = data.callChain.map(c =>
+    `<span class="chain-item" title="${esc(c.serviceName)}">${esc(c.name)}</span><span class="chain-arrow">→</span>`
+  ).join("");
+  chainEl.innerHTML = chainItems + `<span class="chain-item current">${esc(s.name)}</span>`;
+  if (data.callChain.length === 0) document.getElementById("chain-section").style.display = "none";
+
+  // Children
+  if (data.children.length > 0) {
+    document.getElementById("children-section").style.display = "block";
+    document.getElementById("children-body").innerHTML = data.children.map(c => `
+      <tr>
+        <td class="mono">${esc(c.name)}</td>
+        <td class="mono">${esc(c.serviceName)}</td>
+        <td class="mono">${fmt(c.durationMs)}</td>
+        <td>${c.statusCode === 2 ? '<span class="badge err">ERR</span>' : '<span class="badge ok">OK</span>'}</td>
+      </tr>`).join("");
+  }
+
+  // Attributes
+  const attrEntries = Object.entries(s.attributes || {});
+  if (attrEntries.length > 0) {
+    document.getElementById("attrs").innerHTML = attrEntries.map(([k, v]) =>
+      `<div class="attr-key">${esc(k)}</div><div class="attr-val">${esc(v)}</div>`
+    ).join("");
+  } else {
+    document.getElementById("attrs-section").style.display = "none";
+  }
+
+  // Action cards
+  const actions = [
+    { id: "explain", icon: "💡", title: "Explain This Span", desc: "Ask the model what this span does and why it took this long" },
+    { id: "bottleneck", icon: "🐌", title: "Find Bottlenecks", desc: "Identify which child spans or self-time contribute most to latency" },
+    { id: "compare", icon: "📊", title: "Compare Similar Spans", desc: `Compare this span with ${sim.count - 1} other "${s.name}" spans across all traces` },
+    { id: "chain", icon: "🔗", title: "Analyze Call Chain", desc: "Examine the full ancestry from root to this span for optimization opportunities" },
+    { id: "errors", icon: "🚨", title: "Error Analysis", desc: "Check for errors in this span and its descendants, suggest fixes" },
+    { id: "optimize", icon: "⚡", title: "Suggest Optimizations", desc: "Get concrete suggestions to reduce this span's duration" },
+  ];
+  document.getElementById("action-cards").innerHTML = actions.map(a => `
+    <div class="action-card" data-action="${a.id}">
+      <div class="icon">${a.icon}</div>
+      <div class="title">${a.title}</div>
+      <div class="desc">${a.desc}</div>
+    </div>
+  `).join("");
+
+  document.querySelectorAll(".action-card").forEach(card => {
+    card.addEventListener("click", () => submitAction(card.dataset.action));
+  });
+}
+
+function statCard(label, value, cls) {
+  return `<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value ${cls || ""}">${value}</div></div>`;
+}
+
+async function submitAction(action) {
+  if (!requestId) return;
+
+  // Build context string with key span info
+  const s = currentData.span;
+  const context = [
+    `Span: ${s.name} (${s.serviceName})`,
+    `Duration: ${s.durationMs}ms (self: ${s.selfTimeMs}ms)`,
+    `Status: ${s.statusCode === 2 ? "ERROR" : "OK"}`,
+    `Children: ${currentData.children.length}`,
+    `Similar spans: ${currentData.similarSpans.count} (avg ${currentData.similarSpans.avgMs}ms, rank ${currentData.similarSpans.thisRank}/${currentData.similarSpans.count})`,
+    `Attributes: ${Object.entries(s.attributes).map(([k, v]) => `${k}=${v}`).join(", ")}`,
+  ].join("\n");
+
+  // Hide actions, show submitted
+  document.getElementById("actions-section").style.display = "none";
+  document.getElementById("submitted").classList.add("visible");
+
+  try {
+    await send("tools/call", {
+      name: "user-span-action",
+      arguments: { requestId, action, context },
+    });
+  } catch (err) {
+    console.error("Failed to submit action:", err);
+  }
+}
+
+// ---- Tool input: receive the requestId ----
+on("ui/notifications/tool-input", (params) => {
+  requestId = params?.arguments?.requestId ?? null;
+});
+
+// ---- Tool result: receive the breakdown data ----
+on("ui/notifications/tool-result", (params) => {
+  if (params?.structuredContent?.span) render(params.structuredContent);
+});
+
+// ---- Partial input ----
+on("ui/notifications/tool-input-partial", (params) => {
+  if (params?.arguments?.spanId) {
+    document.getElementById("span-subtitle").textContent = `Loading span ${params.arguments.spanId}…`;
+  }
+});
+
+on("ui/notifications/host-context-changed", applyTheme);
+
+// ---- Size reporting via ResizeObserver ----
+let lastW = 0, lastH = 0;
+const resizeObs = new ResizeObserver((entries) => {
+  for (const e of entries) {
+    const w = Math.ceil(e.contentRect.width);
+    const h = Math.ceil(e.contentRect.height);
+    if (w !== lastW || h !== lastH) {
+      lastW = w; lastH = h;
+      notify("ui/notifications/size-changed", { width: w, height: h });
+    }
+  }
+});
+resizeObs.observe(document.body);
+
+// ---- Initialize ----
+(async () => {
+  try {
+    const result = await send("ui/initialize", {
+      protocolVersion: "2026-01-26",
+      capabilities: {},
+      clientInfo: { name: "otel-span-breakdown", version: "0.1.0" },
+    });
+    if (result?.hostContext) applyTheme(result.hostContext);
+    notify("ui/notifications/initialized", {});
+  } catch (e) {
+    console.error("App init failed:", e);
+  }
+})();
+</script>
+</body>
+</html>

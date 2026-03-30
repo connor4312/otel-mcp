@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trace Dashboard</title>
+<style>
+:root {
+  --color-background-primary: light-dark(#ffffff, #0f1117);
+  --color-background-secondary: light-dark(#f8f9fa, #1a1d27);
+  --color-background-tertiary: light-dark(#e9ecef, #22263a);
+  --color-text-primary: light-dark(#171717, #e2e8f0);
+  --color-text-secondary: light-dark(#6b7280, #94a3b8);
+  --color-text-danger: light-dark(#dc2626, #ef4444);
+  --color-text-success: light-dark(#16a34a, #22c55e);
+  --color-border-primary: light-dark(#e5e7eb, #2e3348);
+  --font-sans: system-ui, -apple-system, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  --border-radius-md: 8px;
+  --border-radius-lg: 12px;
+  color-scheme: light dark;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: var(--font-sans);
+  background: var(--color-background-primary);
+  color: var(--color-text-primary);
+  padding: 16px;
+  line-height: 1.5;
+}
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.stat-card {
+  background: var(--color-background-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: var(--border-radius-md);
+  padding: 14px 16px;
+}
+.stat-label { font-size: 0.75rem; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+.stat-value { font-size: 1.5rem; font-weight: 700; margin-top: 2px; }
+.stat-value.error { color: var(--color-text-danger); }
+.stat-value.ok { color: var(--color-text-success); }
+h2 { font-size: 1rem; font-weight: 600; margin-bottom: 10px; color: var(--color-text-secondary); }
+.section { margin-bottom: 24px; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th { text-align: left; padding: 8px 10px; border-bottom: 2px solid var(--color-border-primary); color: var(--color-text-secondary); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+td { padding: 7px 10px; border-bottom: 1px solid var(--color-border-primary); }
+tr:hover td { background: var(--color-background-tertiary); }
+tr.clickable { cursor: pointer; }
+tr.clickable:active td { background: rgba(99,102,241,0.1); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; }
+.badge.err { background: rgba(239,68,68,0.15); color: var(--color-text-danger); }
+.badge.ok { background: rgba(34,197,94,0.15); color: var(--color-text-success); }
+.mono { font-family: var(--font-mono); font-size: 0.8rem; }
+.bar-cell { position: relative; }
+.bar { height: 6px; border-radius: 3px; background: #6366f1; min-width: 2px; }
+.live-dot { display: inline-block; width: 8px; height: 8px; background: #22c55e; border-radius: 50%; margin-right: 6px; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+.live-bar { display: flex; align-items: center; font-size: 0.75rem; color: var(--color-text-secondary); margin-bottom: 16px; }
+.skeleton { background: var(--color-background-tertiary); border-radius: 4px; height: 16px; animation: shimmer 1.5s infinite; }
+@keyframes shimmer { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
+.loading-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.loading-grid .skeleton { height: 60px; border-radius: var(--border-radius-md); }
+.loading-table .skeleton { height: 14px; margin-bottom: 10px; width: 80%; }
+.actions { display: flex; gap: 8px; margin-bottom: 16px; }
+.btn { padding: 6px 14px; border: 1px solid var(--color-border-primary); border-radius: var(--border-radius-md); background: var(--color-background-secondary); color: var(--color-text-primary); font-size: 0.8rem; cursor: pointer; font-family: var(--font-sans); }
+.btn:hover { background: var(--color-background-tertiary); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn.primary { background: #6366f1; color: white; border-color: #6366f1; }
+.btn.primary:hover { background: #818cf8; }
+.btn.primary:disabled { background: #6366f1; }
+.findings { margin-top: 16px; }
+.finding { padding: 10px 14px; border-left: 3px solid var(--color-border-primary); background: var(--color-background-secondary); border-radius: 0 var(--border-radius-md) var(--border-radius-md) 0; margin-bottom: 8px; }
+.finding.critical { border-left-color: var(--color-text-danger); }
+.finding.warning { border-left-color: #f59e0b; }
+.finding.info { border-left-color: #6366f1; }
+.finding-title { font-weight: 600; font-size: 0.85rem; }
+.finding-detail { font-size: 0.8rem; color: var(--color-text-secondary); margin-top: 2px; font-family: var(--font-mono); }
+.finding-severity { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; margin-right: 6px; }
+.finding-severity.critical { color: var(--color-text-danger); }
+.finding-severity.warning { color: #f59e0b; }
+.finding-severity.info { color: #6366f1; }
+.analysis-summary { font-size: 0.85rem; color: var(--color-text-secondary); margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<!-- Loading skeleton shown during partial streaming -->
+<div id="loading">
+  <div class="loading-grid"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
+  <div class="loading-table"><div class="skeleton"></div><div class="skeleton" style="width:60%"></div><div class="skeleton" style="width:90%"></div><div class="skeleton" style="width:70%"></div></div>
+</div>
+
+<div id="dashboard" style="display:none">
+  <div class="stats-grid" id="stats-grid"></div>
+
+  <div class="actions">
+    <button class="btn" id="btn-analyze" title="Ask the model to analyze these traces">🔍 Analyze Traces</button>
+    <button class="btn primary" id="btn-deep" title="Run a configurable deep analysis with custom thresholds">🧪 Deep Analysis</button>
+    <button class="btn" id="btn-export" title="Download trace data as JSON">📥 Export JSON</button>
+  </div>
+
+  <div class="section" id="analysis-section" style="display:none">
+    <h2>Analysis Results</h2>
+    <div class="analysis-summary" id="analysis-summary"></div>
+    <div class="findings" id="findings"></div>
+  </div>
+
+  <div class="section">
+    <h2>Top Operations</h2>
+    <table><thead><tr><th>Name</th><th>Count</th><th>Avg</th><th>p99</th><th>Distribution</th></tr></thead><tbody id="ops-body"></tbody></table>
+  </div>
+
+  <div class="section">
+    <h2>Slowest Traces</h2>
+    <table><thead><tr><th>Trace</th><th>Root Span</th><th>Spans</th><th>Duration</th><th>Errors</th><th>Time</th></tr></thead><tbody id="traces-body"></tbody></table>
+  </div>
+</div>
+
+<script>
+// ---- MCP App communication layer (vanilla postMessage JSON-RPC) ----
+let nextId = 1;
+const pending = new Map();
+const handlers = new Map();
+
+function send(method, params) {
+  const id = nextId++;
+  return new Promise((resolve, reject) => {
+    pending.set(id, { resolve, reject });
+    window.parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*");
+  });
+}
+function notify(method, params) {
+  window.parent.postMessage({ jsonrpc: "2.0", method, params }, "*");
+}
+function on(method, fn) { handlers.set(method, fn); }
+
+window.addEventListener("message", (e) => {
+  const d = e.data;
+  if (!d || d.jsonrpc !== "2.0") return;
+  if (d.id && pending.has(d.id)) {
+    const p = pending.get(d.id);
+    pending.delete(d.id);
+    d.error ? p.reject(d.error) : p.resolve(d.result);
+  }
+  if (d.method && handlers.has(d.method)) {
+    handlers.get(d.method)(d.params);
+  }
+});
+
+// ---- Theming ----
+function applyTheme(ctx) {
+  if (ctx.theme) document.documentElement.style.colorScheme = ctx.theme;
+  if (ctx.styles?.variables) {
+    for (const [k, v] of Object.entries(ctx.styles.variables)) {
+      if (v) document.documentElement.style.setProperty(k, v);
+    }
+  }
+  if (ctx.styles?.css?.fonts) {
+    const s = document.createElement("style");
+    s.textContent = ctx.styles.css.fonts;
+    document.head.appendChild(s);
+  }
+}
+
+// ---- Rendering ----
+let currentData = null;
+
+function renderDashboard(data) {
+  currentData = data;
+  document.getElementById("loading").style.display = "none";
+  document.getElementById("dashboard").style.display = "block";
+
+  // Stats cards
+  const statsEl = document.getElementById("stats-grid");
+  statsEl.innerHTML = [
+    card("Traces", data.totalTraces),
+    card("Spans", data.totalSpans),
+    card("Error Rate", data.errorRate + "%", data.errorRate > 5 ? "error" : "ok"),
+    card("p50 Latency", fmt(data.latencyPercentiles.p50)),
+    card("p95 Latency", fmt(data.latencyPercentiles.p95)),
+    card("p99 Latency", fmt(data.latencyPercentiles.p99)),
+  ].join("");
+
+  // Operations table
+  const maxAvg = Math.max(...data.spanNames.map(s => s.avgDurationMs), 1);
+  document.getElementById("ops-body").innerHTML = data.spanNames.slice(0, 15).map(s => `
+    <tr>
+      <td class="mono">${esc(s.name)}</td>
+      <td>${s.count}</td>
+      <td class="mono">${fmt(s.avgDurationMs)}</td>
+      <td class="mono">${fmt(s.p99DurationMs)}</td>
+      <td class="bar-cell"><div class="bar" style="width:${Math.max(2, (s.avgDurationMs / maxAvg) * 100)}%"></div></td>
+    </tr>
+  `).join("");
+
+  // Traces table
+  const traceRows = (data.traces || []).slice(0, 20);
+  document.getElementById("traces-body").innerHTML = traceRows.map((t, i) => `
+    <tr class="clickable" data-idx="${i}">
+      <td class="mono">${t.traceId.slice(0, 8)}…</td>
+      <td>${esc(t.rootSpanName)}</td>
+      <td>${t.spanCount}</td>
+      <td class="mono">${fmt(t.durationMs)}</td>
+      <td>${t.errorCount > 0 ? `<span class="badge err">${t.errorCount} err</span>` : `<span class="badge ok">ok</span>`}</td>
+      <td class="mono" style="font-size:0.75rem">${new Date(t.startTime).toLocaleTimeString()}</td>
+    </tr>
+  `).join("");
+
+  // Click handler for trace rows
+  document.getElementById("traces-body").querySelectorAll("tr.clickable").forEach(row => {
+    row.addEventListener("click", () => {
+      const t = traceRows[parseInt(row.dataset.idx)];
+      if (!t) return;
+      row.style.opacity = "0.5";
+      send("ui/message", {
+        role: "user",
+        content: [{ type: "text", text: `Show me the detail for trace ${t.traceId} ("${t.rootSpanName}")` }],
+      }).then(() => {
+        row.style.opacity = "";
+      }).catch((err) => {
+        console.error("ui/message failed:", err);
+        row.style.opacity = "";
+      });
+    });
+  });
+}
+
+function card(label, value, cls) {
+  return `<div class="stat-card"><div class="stat-label">${label}</div><div class="stat-value ${cls || ""}">${value}</div></div>`;
+}
+function fmt(ms) { return ms >= 1000 ? (ms / 1000).toFixed(2) + "s" : ms.toFixed(1) + "ms"; }
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+// ---- Deep Analysis (app-only tool that triggers server-side elicitation) ----
+document.getElementById("btn-deep").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-deep");
+  btn.disabled = true;
+  btn.textContent = "⏳ Analyzing with LLM…";
+  try {
+    const r = await send("tools/call", { name: "deep-analysis", arguments: {} });
+    if (r?.structuredContent) {
+      renderAnalysis(r.structuredContent);
+    } else if (r?.content?.[0]?.text) {
+      // Cancelled or error — show as summary
+      document.getElementById("analysis-section").style.display = "block";
+      document.getElementById("analysis-summary").textContent = r.content[0].text;
+      document.getElementById("findings").innerHTML = "";
+    }
+  } catch (err) {
+    console.error("Deep analysis failed:", err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🧪 Deep Analysis";
+  }
+});
+
+function renderAnalysis(data) {
+  document.getElementById("analysis-section").style.display = "block";
+  document.getElementById("analysis-summary").textContent =
+    data.summary + (data.model ? ` (via ${data.model})` : "");
+  document.getElementById("findings").innerHTML = (data.findings || []).map(f => `
+    <div class="finding ${f.severity}">
+      <span class="finding-severity ${f.severity}">${f.severity}</span>
+      <span class="finding-title">${esc(f.title)}</span>
+      <div class="finding-detail">${esc(f.detail)}</div>
+    </div>
+  `).join("");
+
+  // Also push findings to model context so it can discuss them
+  const ctx = [
+    `---`,
+    `analysis-focus: ${data.config?.focus}`,
+    `findings-count: ${data.findings?.length}`,
+    `---`,
+    ``,
+    ...data.findings.map(f => `[${f.severity.toUpperCase()}] ${f.title}: ${f.detail}`),
+  ].join("\n");
+  send("ui/update-model-context", { content: [{ type: "text", text: ctx }] }).catch(() => {});
+}
+
+// ---- Progressive rendering (partial input) ----
+on("ui/notifications/tool-input-partial", (params) => {
+  // Show loading skeleton while data streams in
+  document.getElementById("loading").style.display = "block";
+  // If partial data available, try rendering
+  if (params?.arguments?.totalTraces != null) {
+    try { renderDashboard(params.arguments); } catch {}
+  }
+});
+
+// ---- Tool input (complete) ----
+on("ui/notifications/tool-input", (params) => {
+  // Tool input just has the arguments the model passed — we don't use them here
+});
+
+// ---- Tool result (the actual data to render) ----
+on("ui/notifications/tool-result", (params) => {
+  if (params?.structuredContent) {
+    renderDashboard(params.structuredContent);
+  }
+});
+
+// ---- Tool cancelled ----
+on("ui/notifications/tool-cancelled", () => {});
+
+// ---- Host context changes ----
+on("ui/notifications/host-context-changed", applyTheme);
+
+// ---- Analyze button → updateModelContext + sendMessage ----
+document.getElementById("btn-analyze").addEventListener("click", async () => {
+  if (!currentData) return;
+  const ctx = [
+    `---`,
+    `total-traces: ${currentData.totalTraces}`,
+    `total-spans: ${currentData.totalSpans}`,
+    `error-rate: ${currentData.errorRate}%`,
+    `p50: ${currentData.latencyPercentiles.p50}ms`,
+    `p95: ${currentData.latencyPercentiles.p95}ms`,
+    `p99: ${currentData.latencyPercentiles.p99}ms`,
+    `services: ${currentData.services.map(s => s.name).join(", ")}`,
+    `---`,
+    ``,
+    `Top operations:`,
+    ...currentData.spanNames.slice(0, 10).map(s => `- ${s.name}: ${s.count}× avg ${s.avgDurationMs}ms p99 ${s.p99DurationMs}ms`),
+  ].join("\n");
+
+  await send("ui/update-model-context", { content: [{ type: "text", text: ctx }] });
+  await send("ui/message", { role: "user", content: { type: "text", text: "Analyze these OpenTelemetry traces. What patterns do you see? Are there any performance concerns or anomalies?" } });
+});
+
+// ---- Export button → calls app-only tool, then ui/open-link ----
+document.getElementById("btn-export").addEventListener("click", async () => {
+  const btn = document.getElementById("btn-export");
+  btn.disabled = true;
+  btn.textContent = "⏳ Exporting…";
+  try {
+    const r = await send("tools/call", { name: "export-traces", arguments: {} });
+    const url = r?.structuredContent?.downloadUrl;
+    if (url) {
+      await send("ui/open-link", { url });
+    }
+  } catch (err) {
+    console.error("Export failed:", err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "📥 Export JSON";
+  }
+});
+
+// ---- Teardown ----
+on("ui/resource-teardown", () => {});
+
+// ---- Size reporting via ResizeObserver ----
+let lastW = 0, lastH = 0;
+const resizeObs = new ResizeObserver((entries) => {
+  for (const e of entries) {
+    const w = Math.ceil(e.contentRect.width);
+    const h = Math.ceil(e.contentRect.height);
+    if (w !== lastW || h !== lastH) {
+      lastW = w; lastH = h;
+      notify("ui/notifications/size-changed", { width: w, height: h });
+    }
+  }
+});
+resizeObs.observe(document.body);
+
+// ---- Initialize ----
+(async () => {
+  try {
+    const result = await send("ui/initialize", {
+      protocolVersion: "2026-01-26",
+      capabilities: {},
+      clientInfo: { name: "otel-trace-dashboard", version: "0.1.0" },
+    });
+    if (result?.hostContext) applyTheme(result.hostContext);
+    notify("ui/notifications/initialized", {});
+  } catch (e) {
+    console.error("App init failed:", e);
+  }
+})();
+</script>
+</body>
+</html>
