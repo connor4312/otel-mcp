@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.tmp
 *.jsonl
+apps/build/
+apps/storybook-static/

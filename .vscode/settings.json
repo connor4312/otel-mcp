@@ -1,0 +1,9 @@
+{
+  "chat.mcp.serverSampling": {
+    "otel-mcp/.vscode/mcp.json: otel": {
+      "allowedModels": [
+        "copilot/claude-haiku-4.5"
+      ]
+    }
+  }
+}

@@ -22,7 +22,7 @@ import { flattenSpans, buildDashboard, buildTraceDetail, buildSpanBreakdown, typ
 const execFileAsync = promisify(execFile);
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
-const PUBLIC_DIR = resolve(__dirname, "..", "public");
+const APPS_DIR = resolve(__dirname, "..", "apps", "build");
 const MCP_PORT = process.env.MCP_PORT ? parseInt(process.env.MCP_PORT, 10) : 3000;
 
 // ---------------------------------------------------------------------------
@@ -54,6 +54,15 @@ const pendingElicitations = new Map<
 const pendingSpanActions = new Map<
   string,
   { resolve: (value: { action: string; context: string }) => void }
+>();
+
+/**
+ * Pending span picks: "Using UI Data in Tool Call Responses" pattern for pick-span-detail.
+ * requestId → resolver called by the app-only tool when the user picks a span.
+ */
+const pendingSpanPicks = new Map<
+  string,
+  { resolve: (value: { traceId: string; spanId: string }) => void }
 >();
 
 /** Token → export JSON string (one-time download tokens) */
@@ -171,7 +180,7 @@ function createServer(): McpServer {
       contents: [{
         uri: "ui://otel/trace-dashboard",
         mimeType: UI_MIME,
-        text: await readFile(resolve(PUBLIC_DIR, "trace-dashboard.html"), "utf-8"),
+        text: await readFile(resolve(APPS_DIR, "trace-dashboard", "index.html"), "utf-8"),
       }],
     }),
   );
@@ -184,7 +193,7 @@ function createServer(): McpServer {
       contents: [{
         uri: "ui://otel/trace-detail",
         mimeType: UI_MIME,
-        text: await readFile(resolve(PUBLIC_DIR, "trace-detail.html"), "utf-8"),
+        text: await readFile(resolve(APPS_DIR, "trace-detail", "index.html"), "utf-8"),
       }],
     }),
   );
@@ -197,7 +206,20 @@ function createServer(): McpServer {
       contents: [{
         uri: "ui://otel/span-breakdown",
         mimeType: UI_MIME,
-        text: await readFile(resolve(PUBLIC_DIR, "span-breakdown.html"), "utf-8"),
+        text: await readFile(resolve(APPS_DIR, "span-breakdown", "index.html"), "utf-8"),
+      }],
+    }),
+  );
+
+  server.registerResource(
+    "pick-span-detail",
+    "ui://otel/pick-span-detail",
+    { title: "Pick Span Detail", description: "Shows top 10 longest spans for user selection", mimeType: UI_MIME },
+    async () => ({
+      contents: [{
+        uri: "ui://otel/pick-span-detail",
+        mimeType: UI_MIME,
+        text: await readFile(resolve(APPS_DIR, "pick-span-detail", "index.html"), "utf-8"),
       }],
     }),
   );
@@ -317,7 +339,7 @@ function createServer(): McpServer {
       // Build a detailed summary of the trace data for the LLM
       const dataContext = [
         `You are analyzing OpenTelemetry trace data. Respond ONLY with a valid JSON object (no markdown fences). The JSON must have this exact shape:`,
-        `{"summary":"one-line summary","findings":[{"severity":"critical|warning|info","title":"short title","detail":"explanation"}]}`,
+        `{"summary":"one-line summary","findings":[{"severity":"critical|warning|info","title":"short title","detail":"explanation","spanName":"exact operation name this finding is about, or empty string if not applicable"}]}`,
         ``,
         `Here is the data:`,
         `- ${dashboard.totalTraces} traces, ${dashboard.totalSpans} spans`,
@@ -353,12 +375,13 @@ function createServer(): McpServer {
         maxTokens: 2000,
       });
 
-      // Parse the LLM response
-      const responseText = samplingResult.content.type === "text"
-        ? samplingResult.content.text
+      // Parse the LLM response (strip markdown code fences if present)
+      let responseText = samplingResult.content.type === "text"
+        ? samplingResult.content.text.trim()
         : "";
+      responseText = responseText.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
 
-      let analysis: { summary: string; findings: { severity: string; title: string; detail: string }[] };
+      let analysis: { summary: string; findings: { severity: string; title: string; detail: string; spanName?: string }[] };
       try {
         analysis = JSON.parse(responseText);
       } catch {
@@ -369,10 +392,32 @@ function createServer(): McpServer {
         };
       }
 
+      // Attach a real example span to each finding that references a span name
+      const findingsWithExamples = analysis.findings.map(f => {
+        const { spanName, ...rest } = f;
+        if (!spanName) return rest;
+
+        // Find spans matching this operation name, pick the slowest as the example
+        const matching = spans.filter(s => s.name === spanName);
+        if (matching.length === 0) return rest;
+
+        const worst = matching.reduce((a, b) => a.durationMs > b.durationMs ? a : b);
+        return {
+          ...rest,
+          exampleSpan: {
+            traceId: worst.traceId,
+            spanId: worst.spanId,
+            name: worst.name,
+            serviceName: worst.serviceName,
+            durationMs: Math.round(worst.durationMs * 100) / 100,
+          },
+        };
+      });
+
       const textLines = [
         `## Deep Analysis: ${analysis.summary}`,
         ``,
-        ...analysis.findings.map(f =>
+        ...findingsWithExamples.map(f =>
           `- **[${f.severity.toUpperCase()}]** ${f.title}: ${f.detail}`
         ),
       ];
@@ -381,7 +426,7 @@ function createServer(): McpServer {
         content: [{ type: "text", text: textLines.join("\n") }],
         structuredContent: {
           summary: analysis.summary,
-          findings: analysis.findings,
+          findings: findingsWithExamples,
           model: samplingResult.model,
         } as any,
       };
@@ -475,6 +520,144 @@ function createServer(): McpServer {
     },
   );
 
+  // -- get-span-breakdown (app-only, fetches breakdown data for the UI) ----
+
+  server.registerTool(
+    "get-span-breakdown",
+    {
+      title: "Get Span Breakdown",
+      description: "Returns span breakdown data for the span-breakdown UI to render. Called by the app when it receives tool-input.",
+      inputSchema: {
+        traceId: z.string().describe("The trace ID containing the span"),
+        spanId: z.string().describe("The span ID to inspect"),
+      },
+      _meta: {
+        ui: {
+          resourceUri: "ui://otel/span-breakdown",
+          visibility: ["app"],
+        },
+      },
+    },
+    async ({ traceId, spanId }, extra) => {
+      const sessionId = extra.sessionId;
+      if (!sessionId) return { content: [{ type: "text", text: "No session." }], isError: true };
+
+      const spans = getSpans(sessionId);
+      const breakdown = buildSpanBreakdown(spans, traceId, spanId);
+      if (!breakdown) {
+        return { content: [{ type: "text", text: `Span ${spanId} not found in trace ${traceId}.` }], isError: true };
+      }
+
+      return {
+        content: [{ type: "text", text: `Breakdown for span ${spanId}` }],
+        structuredContent: breakdown as any,
+      };
+    },
+  );
+
+  // -- pick-span-detail (model-visible, "UI Data in Tool Call Responses") --
+
+  server.registerTool(
+    "pick-span-detail",
+    {
+      title: "Pick Span Detail",
+      description: "Shows the user the top 10 longest spans in a trace and lets them pick one to analyze. Returns the selected span's trace detail so you can continue analysis.",
+      inputSchema: {
+        requestId: z.string().describe("Unique ID for this pick request"),
+        traceId: z.string().describe("The trace ID to pick spans from"),
+      },
+      _meta: {
+        ui: { resourceUri: "ui://otel/pick-span-detail" },
+      },
+    },
+    async ({ requestId, traceId }, extra) => {
+      const sessionId = extra.sessionId;
+      if (!sessionId) return { content: [{ type: "text", text: "No session." }], isError: true };
+
+      const spans = getSpans(sessionId);
+      const traceSpans = spans.filter(s => s.traceId === traceId);
+      if (traceSpans.length === 0) {
+        return { content: [{ type: "text", text: `Trace ${traceId} not found.` }], isError: true };
+      }
+
+      // Get top 10 longest spans
+      const topSpans = [...traceSpans]
+        .sort((a, b) => b.durationMs - a.durationMs)
+        .slice(0, 10)
+        .map(s => ({
+          traceId: s.traceId,
+          spanId: s.spanId,
+          name: s.name,
+          serviceName: s.serviceName,
+          durationMs: Math.round(s.durationMs * 100) / 100,
+          statusCode: s.statusCode,
+        }));
+
+      // Wait for the user to pick a span in the UI
+      const picked = await new Promise<{ traceId: string; spanId: string }>((resolve) => {
+        pendingSpanPicks.set(requestId, { resolve });
+      });
+      pendingSpanPicks.delete(requestId);
+
+      // Build full trace detail for the picked span's trace
+      const detail = buildTraceDetail(spans, picked.traceId);
+      const pickedSpan = spans.find(s => s.traceId === picked.traceId && s.spanId === picked.spanId);
+
+      const lines = [
+        `## Selected Span: ${pickedSpan?.name ?? picked.spanId}`,
+        `- **Service:** ${pickedSpan?.serviceName ?? "unknown"}`,
+        `- **Duration:** ${pickedSpan ? Math.round(pickedSpan.durationMs * 100) / 100 : "?"}ms`,
+        `- **Trace:** ${picked.traceId.slice(0, 8)}…`,
+        `- **Span ID:** ${picked.spanId}`,
+      ];
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        structuredContent: {
+          topSpans,
+          picked: {
+            traceId: picked.traceId,
+            spanId: picked.spanId,
+            name: pickedSpan?.name,
+            serviceName: pickedSpan?.serviceName,
+            durationMs: pickedSpan ? Math.round(pickedSpan.durationMs * 100) / 100 : undefined,
+          },
+          traceDetail: detail,
+        } as any,
+      };
+    },
+  );
+
+  // -- user-picked-span (app-only, resolves pick-span-detail) -------------
+
+  server.registerTool(
+    "user-picked-span",
+    {
+      title: "User Picked Span",
+      description: "Called by the pick-span-detail UI when the user selects a span. Resolves the pending pick-span-detail request.",
+      inputSchema: {
+        requestId: z.string().describe("The requestId from the pick-span-detail call"),
+        traceId: z.string().describe("The trace ID of the selected span"),
+        spanId: z.string().describe("The span ID the user selected"),
+      },
+      _meta: {
+        ui: {
+          resourceUri: "ui://otel/pick-span-detail",
+          visibility: ["app"],
+        },
+      },
+    },
+    async ({ requestId, traceId, spanId }) => {
+      const pending = pendingSpanPicks.get(requestId);
+      if (pending) {
+        pending.resolve({ traceId, spanId });
+        pendingSpanPicks.delete(requestId);
+        return { content: [{ type: "text", text: "Span selection submitted." }] };
+      }
+      return { content: [{ type: "text", text: "No pending pick request found." }], isError: true };
+    },
+  );
+
   // -- show-trace-detail (model-visible, waterfall view) ------------------
 
   server.registerTool(
@@ -539,8 +722,8 @@ app.use(
   }),
 );
 
-// Serve the HTML form
-app.use("/select-source", express.static(PUBLIC_DIR + "/select-source.html"));
+// Serve the select-source form (SvelteKit build output)
+app.use("/select-source", express.static(resolve(APPS_DIR, "select-source", "index.html")));
 
 // Parse JSON bodies for our API route
 app.use("/api", express.json());

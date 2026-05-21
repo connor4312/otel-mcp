@@ -5,8 +5,11 @@
   "main": "index.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
-    "start": "node dist/server.js"
+    "build": "npm run build:apps && tsc",
+    "build:apps": "cd apps && npm run build",
+    "start": "node dist/server.js",
+    "storybook": "cd apps && npm run storybook",
+    "build-storybook": "cd apps && npm run build-storybook"
   },
   "keywords": [],
   "author": "",
